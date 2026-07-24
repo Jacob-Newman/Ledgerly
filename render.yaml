@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: ledgerly-budget
+    runtime: docker
+    plan: free
+    autoDeployTrigger: commit
+    healthCheckPath: /health

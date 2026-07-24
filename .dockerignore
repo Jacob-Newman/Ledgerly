@@ -1,0 +1,13 @@
+.git
+.gitignore
+.venv
+node_modules
+dist
+coverage
+__pycache__
+.pytest_cache
+*.py[cod]
+*.tsbuildinfo
+*.csv
+!apps/api/tests/fixtures/*.csv
+npm-debug.log*
