@@ -11,6 +11,7 @@ import {
   Home,
   Landmark,
   LockKeyhole,
+  LogOut,
   Menu,
   PiggyBank,
   ReceiptText,
@@ -33,9 +34,13 @@ import {
   type AccountTypeChoice,
   type AnalysisResult,
   type Category,
+  type ImportRecord,
   type Transaction,
 } from "./types";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { AuthScreen } from "./AuthScreen";
+import { isSupabaseConfigured, supabase } from "./lib/supabase";
 
 type View = "overview" | "transactions" | "imports";
 
@@ -199,7 +204,7 @@ function ImportModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onImported: (result: AnalysisResult) => void;
+  onImported: (result: AnalysisResult) => Promise<void>;
   existingTransactions: Transaction[];
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -251,7 +256,7 @@ function ImportModal({
       const response = await fetch("/api/analyze", { method: "POST", body: form });
       const body = (await response.json()) as AnalysisResult & { detail?: string };
       if (!response.ok) throw new Error(body.detail || "Could not analyze those statements.");
-      onImported(body as AnalysisResult);
+      await onImported(body as AnalysisResult);
       setFiles([]);
       onClose();
     } catch (requestError) {
@@ -365,8 +370,8 @@ function ImportModal({
         <div className="modal-security">
           <ShieldCheck size={18} />
           <p>
-            Files are analyzed only for this session. No login, database, bank
-            credentials, or persistent storage.
+            CSV files are analyzed for this import and then discarded. Ledgerly
+            never asks for bank credentials or stores the original file.
           </p>
         </div>
 
@@ -385,6 +390,10 @@ function ImportModal({
 }
 
 export default function HomePage() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
+  const [loadingLedger, setLoadingLedger] = useState(false);
+  const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const [view, setView] = useState<View>("overview");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -392,6 +401,50 @@ export default function HomePage() {
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All categories");
   const [showExcluded, setShowExcluded] = useState(true);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    let active = true;
+    void supabase.auth.getSession().then(({ data }) => {
+      if (active) {
+        setSession(data.session);
+        setAuthReady(true);
+      }
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setAuthReady(true);
+    });
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!session) {
+      setData(emptyResult());
+      return;
+    }
+    let active = true;
+    setLoadingLedger(true);
+    setPersistenceError(null);
+    void Promise.all([
+      supabase.from("transactions").select("*").order("date", { ascending: false }),
+      supabase.from("imports").select("filename,institution,account_name,account_type,rows_read,rows_added,duplicates_ignored").order("created_at", { ascending: false }),
+    ]).then(([transactionsResult, importsResult]) => {
+      if (!active) return;
+      if (transactionsResult.error || importsResult.error) {
+        setPersistenceError(transactionsResult.error?.message || importsResult.error?.message || "Could not load your saved data.");
+      } else {
+        const transactions = (transactionsResult.data || []) as Transaction[];
+        const imports = (importsResult.data || []) as ImportRecord[];
+        setData({ ...emptyResult(), transactions, imports, summary: summarize(transactions) });
+      }
+      setLoadingLedger(false);
+    });
+    return () => { active = false; };
+  }, [session]);
 
   const filteredTransactions = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -412,7 +465,21 @@ export default function HomePage() {
     setMobileNavOpen(false);
   };
 
-  const handleImported = (result: AnalysisResult) => {
+  const handleImported = async (result: AnalysisResult) => {
+    if (!session) throw new Error("Sign in before importing statements.");
+    setPersistenceError(null);
+    const transactionRows = result.transactions.map((transaction) => ({
+      ...transaction,
+      user_id: session.user.id,
+      updated_at: new Date().toISOString(),
+    }));
+    const importsRows = result.imports.map((item) => ({ ...item, user_id: session.user.id }));
+    const { error: transactionError } = await supabase
+      .from("transactions")
+      .upsert(transactionRows, { onConflict: "user_id,id" });
+    if (transactionError) throw new Error(transactionError.message);
+    const { error: importsError } = await supabase.from("imports").insert(importsRows);
+    if (importsError) throw new Error(importsError.message);
     setData((current) => ({
       ...result,
       imports: [...current.imports, ...result.imports],
@@ -420,7 +487,16 @@ export default function HomePage() {
     setView("overview");
   };
 
-  const recategorize = (id: string, category: Category) => {
+  const recategorize = async (id: string, category: Category) => {
+    if (!session) return;
+    const { error } = await supabase
+      .from("transactions")
+      .update({ category, updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) {
+      setPersistenceError(error.message);
+      return;
+    }
     setData((current) => {
       const transactions = current.transactions.map((transaction) =>
         transaction.id === id ? { ...transaction, category } : transaction,
@@ -436,12 +512,33 @@ export default function HomePage() {
     0,
   );
 
+  const clearLedger = async () => {
+    if (!session) return;
+    setPersistenceError(null);
+    const [transactionsResult, importsResult] = await Promise.all([
+      supabase.from("transactions").delete().eq("user_id", session.user.id),
+      supabase.from("imports").delete().eq("user_id", session.user.id),
+    ]);
+    const error = transactionsResult.error || importsResult.error;
+    if (error) {
+      setPersistenceError(error.message);
+      return;
+    }
+    setData(emptyResult());
+  };
+
+  if (!isSupabaseConfigured) {
+    return <main className="auth-shell"><section className="auth-card"><div className="auth-mark"><LockKeyhole size={21} /></div><h1>Configuration needed</h1><p>Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_PUBLISHABLE_KEY</code> to <code>.env.local</code>, then restart the dev server.</p></section></main>;
+  }
+  if (!authReady) return <main className="auth-shell"><p>Loading Ledgerly…</p></main>;
+  if (!session) return <AuthScreen />;
+
   return (
     <div className="app-shell">
       <aside className={`sidebar ${mobileNavOpen ? "open" : ""}`}>
         <div className="brand">
           <span>Ledgerly</span>
-          <small>Private budget workspace</small>
+          <small>{session.user.email || "Private budget workspace"}</small>
         </div>
         <nav aria-label="Primary navigation">
           <button className={view === "overview" ? "active" : ""} onClick={() => selectView("overview")}>
@@ -461,10 +558,13 @@ export default function HomePage() {
             Imports
           </button>
         </nav>
+        <button className="sign-out-button" onClick={() => void supabase.auth.signOut()}>
+          <LogOut size={17} /> Sign out
+        </button>
         <div className="sidebar-card">
           <LockKeyhole size={18} />
-          <strong>Session-only by design</strong>
-          <p>Your statements and edits disappear when this browser session ends.</p>
+          <strong>Private by design</strong>
+          <p>Your saved transactions are visible only to your account.</p>
         </div>
       </aside>
 
@@ -511,6 +611,9 @@ export default function HomePage() {
           </button>
         </header>
 
+        {loadingLedger && <p className="persistence-status">Loading your saved budget…</p>}
+        {persistenceError && <p className="persistence-status error">{persistenceError}</p>}
+
         {view === "overview" && (
           <>
             <section className="summary-grid" aria-label="Budget summary">
@@ -548,7 +651,7 @@ export default function HomePage() {
                     <span className="eyebrow">BREAKDOWN</span>
                     <h2>Spending by category</h2>
                   </div>
-                  <span className="period-chip">This session</span>
+                    <span className="period-chip">All saved data</span>
                 </div>
                 {data.summary.categories.length ? (
                   <>
@@ -672,7 +775,7 @@ export default function HomePage() {
               <span>
                 {filteredTransactions.length} of {data.transactions.length} transactions
               </span>
-              <span>Category edits last for this session</span>
+                <span>Category edits save automatically</span>
             </div>
             <div className="full-transaction-list">
               {filteredTransactions.length ? (
@@ -723,17 +826,17 @@ export default function HomePage() {
               <div className="privacy-explainer">
                 <LockKeyhole size={21} />
                 <div>
-                  <strong>Nothing is persisted</strong>
-                  <p>
-                    CSV contents are held in memory only. Refreshing or closing this
-                    session clears statements, transactions, and category edits.
+                    <strong>Your data is saved privately</strong>
+                    <p>
+                      CSV files are analyzed and discarded. Transactions and category edits
+                      are saved to your private Ledgerly workspace.
                   </p>
                 </div>
               </div>
               <button
                 className="clear-button"
                 disabled={!data.transactions.length && !data.imports.length}
-                onClick={() => setData(emptyResult())}
+                onClick={() => void clearLedger()}
               >
                 <Trash2 size={16} />
                 Clear this session
@@ -786,9 +889,9 @@ export default function HomePage() {
           </section>
         )}
 
-        <footer className="session-footer">
+      <footer className="session-footer">
           <LockKeyhole size={15} />
-          Your files are cleared when this session ends.
+          Your original CSV files are never stored.
         </footer>
       </main>
 

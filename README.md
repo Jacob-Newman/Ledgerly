@@ -9,14 +9,15 @@ The app has:
 
 - A React and Vite frontend
 - A Python and FastAPI backend
-- No login
-- No database
+- Supabase email/password login
+- A Supabase Postgres database with per-user access controls
 - No bank connection
-- No required `.env` file
+- A local `.env.local` file for Supabase's browser configuration
 
-Uploaded CSV data is processed in memory for the current browser session. The
-backend does not save statements to a database or write them to disk. Refreshing
-the page clears the current session.
+Uploaded CSV data is processed in memory by the backend and is never written to
+disk. Ledgerly saves normalized transactions, import summaries, and category
+edits to the signed-in user's private database workspace; it does not retain the
+original CSV files.
 
 ## Project structure
 
@@ -42,6 +43,23 @@ Install:
 
 No Docker installation is required to run the app locally or deploy it through
 Render.
+
+## Set up Supabase
+
+1. Create a Supabase project and run
+   [`supabase/migrations/20260724_create_ledgerly_tables.sql`](supabase/migrations/20260724_create_ledgerly_tables.sql)
+   in its SQL Editor.
+2. In the project Auth settings, enable Email authentication and configure your
+   site URL and redirect URLs for your local and deployed Ledgerly addresses.
+3. Create a `.env.local` file in the project root:
+
+```env
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
+```
+
+The publishable key is meant for browser use. Do not add a database password or
+Supabase `service_role` key to `.env.local`.
 
 ## Run locally on Windows
 
@@ -151,7 +169,11 @@ GitHub Desktop if you prefer a graphical interface.
 
 The repository includes a `Dockerfile` and `render.yaml`. Render builds the
 React frontend, installs the FastAPI backend, and hosts both from one web
-service. No database or environment variables are required.
+service. In the Render service's **Environment** page, add the same
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` values from your local
+`.env.local`, then choose **Save, rebuild, and deploy**. Render supplies these
+as Docker build arguments so Vite can include the browser-safe configuration in
+the frontend bundle. Do not add a database password or service-role key there.
 
 ### 1. Create the service
 
@@ -243,12 +265,11 @@ positive or negative values.
 
 ## Privacy and security notes
 
-- The hosted website has no login. Anyone who knows its public Render URL can
-  open it.
-- Uploaded statements are processed for the request and are not persisted by
-  the backend.
-- The current session's analyzed data exists in the browser and is cleared by a
-  refresh.
+- The hosted website requires a Ledgerly account. Supabase Row Level Security
+  limits rows to their owner.
+- Uploaded statements are processed for the request and are not saved as files.
+- Normalized transactions, import summaries, and category edits persist in the
+  signed-in user's database workspace.
 - HTTPS is provided by Render for the `onrender.com` address.
 - Do not commit real bank statements, API keys, passwords, or `.env` files to
   GitHub.

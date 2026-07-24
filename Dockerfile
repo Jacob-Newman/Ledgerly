@@ -2,6 +2,13 @@ FROM node:22-bookworm-slim AS frontend-build
 
 WORKDIR /app
 
+# Render passes configured environment variables to Docker builds as build args.
+# These are Supabase browser configuration values, not server secrets.
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_PUBLISHABLE_KEY
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
+ENV VITE_SUPABASE_PUBLISHABLE_KEY=$VITE_SUPABASE_PUBLISHABLE_KEY
+
 COPY package.json package-lock.json ./
 RUN npm ci
 

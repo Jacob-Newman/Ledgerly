@@ -63,6 +63,55 @@ select:focus-visible {
   min-height: 100vh;
 }
 
+.auth-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-card {
+  width: min(100%, 460px);
+  padding: 42px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: rgba(255, 252, 246, 0.92);
+  box-shadow: var(--shadow);
+}
+
+.auth-mark {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 22px;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--ink);
+  color: #fff;
+}
+
+.auth-card h1 {
+  margin: 8px 0 10px;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 38px;
+  letter-spacing: -0.045em;
+}
+
+.auth-card > p { color: var(--muted); line-height: 1.6; }
+.auth-form { display: grid; gap: 16px; margin-top: 28px; }
+.auth-form label { display: grid; gap: 7px; font-size: 13px; font-weight: 700; }
+.auth-input { display: flex; align-items: center; gap: 10px; padding: 0 13px; border: 1px solid var(--border); border-radius: 11px; background: #fff; color: var(--sage-dark); }
+.auth-input input { width: 100%; min-height: 47px; border: 0; outline: 0; background: transparent; color: var(--ink); }
+.auth-submit { display: flex; min-height: 48px; align-items: center; justify-content: center; gap: 9px; border: 0; border-radius: 11px; background: var(--orange); color: #fff; cursor: pointer; font-weight: 700; }
+.auth-submit:hover { background: var(--orange-dark); }
+.auth-submit:disabled { cursor: wait; opacity: 0.7; }
+.auth-switch { width: 100%; margin-top: 18px; border: 0; background: transparent; color: var(--sage-dark); cursor: pointer; font-size: 13px; font-weight: 700; }
+.auth-feedback { margin: 0; color: var(--sage-dark); font-size: 13px; line-height: 1.45; }
+.auth-feedback.error, .persistence-status.error { color: #b42f16; }
+
+.sign-out-button { display: flex; align-items: center; gap: 9px; margin: 20px 8px 8px; padding: 10px 6px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; font-weight: 700; }
+.persistence-status { margin: -12px 0 24px; color: var(--sage-dark); font-size: 13px; font-weight: 600; }
+
 .sidebar {
   position: fixed;
   inset: 0 auto 0 0;
